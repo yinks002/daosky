@@ -1,0 +1,13 @@
+{
+    "canisters": {
+        "dao": {
+            "type": "custom",
+            "main": "src/index.ts",
+            "candid": "src/index.did",
+            "build": "npx azle dao",
+            "wasm": ".azle/dao/dao.wasm",
+            "gzip": true
+        }
+    }
+}
+
