@@ -1,4 +1,4 @@
-import { Proposal,DAO,ProposalPayload,DaoCreator, DaoPayload, DaoList, Delegates } from './types';
+import { Proposal,DAO,ProposalPayload,DaoCreator, DaoPayload, DaoList, Delegates, ProposalSave } from './types';
 
 // this is a dao to fund startups
 import {Ok,Variant,nat64, Canister, query, text, update, Void,Vec ,Principal, Result, ic, Err, Opt, None, Some} from 'azle';
@@ -8,7 +8,8 @@ let message = '';
 const DaoError = Variant({
     DaoDoesNotExist: Principal,
     UserDoesNotExist: Principal,
-    Error: Principal
+    Error: Principal,
+    AlreadyJoinedDao: Principal
 });
 export default Canister({
 
@@ -19,6 +20,10 @@ export default Canister({
     createDaos: update([DaoPayload], DAO, (payload)=>{
 
         const id = generateId();
+        const delegate : typeof Delegates={
+            id: ic.caller(),
+            shares: 2000n
+        }
         const dao :typeof DAO ={
             id: id,
             ...payload,
@@ -26,17 +31,18 @@ export default Canister({
             Proposals: [],
             DaoAvailable: true,
             lockedFunds: 500n,
-            Delegates: [],
+            Delegates: [delegate],
             creator: ic.caller(),
             CreatedAt: ic.time(),
             updatedAt: None
         } 
+
         DaoCreator.insert(ic.caller(),dao)
         DaoList.insert(dao.id, dao)
         return dao;
     }),
-    addMoreShares:update([nat64], Result(DAO,DaoError),(shares)=>{
-        const daoOpt = DaoCreator.get(ic.caller())
+    addMoreShares:update([Principal,nat64], Result(DAO,DaoError),(DaoId,shares)=>{
+        const daoOpt = DaoList.get(DaoId)
         if( 'None' in daoOpt){
             return Err({
                 DaoDoesNotExist: ic.caller()
@@ -45,7 +51,7 @@ export default Canister({
         const dao = daoOpt.Some
     
         //shares can only be addded or updated if total shares is less than 1000
-        if(dao.creator !== ic.caller() && dao.TotalShares < 1000n){
+        if(dao.creator != ic.caller() && dao.TotalShares < 1000n){
             return Err({
                 Error: ic.caller()
             })
@@ -70,7 +76,7 @@ export default Canister({
             })
         }
         const dao = DaoOpt.Some;
-        if(dao.creator != ic.caller && dao.DaoAvailable== true){
+        if(dao.creator != ic.caller && dao.DaoAvailable != true){
             return Err({
                 Error: ic.caller()
             })
@@ -85,8 +91,27 @@ export default Canister({
 
     }),
 
-    createProposal: update([ProposalPayload], Proposal, (payload)=>{
+    createProposal: update([Principal,ProposalPayload], Result(Proposal,DaoError), (DaoId,payload)=>{
+        
         const id  = generateId()
+        const DaoOpt = DaoList.get(DaoId)
+        const dao = DaoOpt.Some
+        const isCallerDelegate = dao.Delegates.some((delegate: typeof Delegates) => {
+            return delegate.id.toText() === ic.caller().toText();
+        });
+        ic.print(`Caller: ${ic.caller().toText()}`);
+        dao.Delegates.forEach((delegate: typeof Delegates) => {
+            ic.print(`Delegate: ${delegate.id.toText()}`);
+        });
+    
+    
+        console.log(isCallerDelegate)
+    
+        if (!isCallerDelegate) {
+            return Err({
+                UserDoesNotExist: ic.caller()
+            });
+        }
         const proposal : typeof Proposal = {
             ...payload,
             id: id,
@@ -97,10 +122,26 @@ export default Canister({
             ProposerAddress: ic.caller(),
             updatedAt: None
         }
-        return proposal;
+        ProposalSave.insert(proposal.id, proposal)
+        return Ok(proposal);
+        
+       
+        // if('None' in DaoOpt){
+        //     return Err({
+        //         DaoDoesNotExist: ic.caller()
+        //     })
+        // }
+
     }),
+    voteWithProposal: update([],Void,()=>{
+
+    }),
+    voteAgainstProposal: update([],Void,()=>{
+
+    }),
+
     //input the id of the dao you want to join
-    JoinDao: update([Principal,nat64], Result(DAO, DaoError),(id)=>{
+    JoinDao: update([Principal], Result(DAO, DaoError),(id)=>{
         const DaoOpt = DaoList.get(id);
         if('None' in DaoOpt){
             return Err({
@@ -110,21 +151,20 @@ export default Canister({
         const dao = DaoOpt.Some;
          // Check if the caller is already a delegate in the DAO
     
-    // Check if the caller is already a delegate in the DAO
-    const isCallerDelegate = dao.Delegates.some((delegate:typeof Delegates) => {
-        return delegate.id == ic.caller();
-    });
-
-    if (isCallerDelegate) {
-        return Err({
-            Error: ic.caller()
+         const isCallerDelegate = dao.Delegates.find((delegate: typeof Delegates) => {
+            return delegate.id.toString() === ic.caller().toString();
         });
-    }
-        if(dao.creator == ic.caller && dao.DaoAvailable== false){
+        console.log(isCallerDelegate)
+        if (isCallerDelegate) {
             return Err({
-                Error: ic.caller()
-            })
+                AlreadyJoinedDao: ic.caller()
+            });
         }
+        // if(dao.creator.toString() == ic.caller().toString() && dao.DaoAvailable == false){
+        //     return Err({
+        //         Error: ic.caller()
+        //     })
+        // }
         const delegate : typeof Delegates={
             id: ic.caller(),
             shares: 2000n
@@ -137,9 +177,20 @@ export default Canister({
         DaoCreator.insert(dao.creator, dao)
         DaoList.insert(id,dao)
 
-        return Ok(ddao);
+        return Result.Ok(ddao);
 
 
+
+    }),
+    DaoList: query([],Vec(DAO),()=>{
+        return DaoList.values()
+    }),
+    
+    getPrincipal: query([], Principal,()=>{
+        return ic.caller()
+    }),
+    StringPrincipal: query([],text,()=>{
+        return ic.caller.toString()
     }),
 
     // Query calls complete quickly because they do not go through consensus
@@ -160,4 +211,9 @@ function generateId(): Principal {
 
     return Principal.fromUint8Array(Uint8Array.from(randomBytes));
 }
+
+
+
+
+// dfx canister call dao createDaos '(record{"name"="yyy"; "TotalShares"=100000})'
 

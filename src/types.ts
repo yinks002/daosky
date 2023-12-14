@@ -50,4 +50,5 @@ export const DaoPayload= Record({
 })
  export let DaoCreator = StableBTreeMap(Principal, DAO, 0)
  export let DaoList = StableBTreeMap(Principal, DAO,1)
+ export let ProposalSave = StableBTreeMap(Principal, Proposal,2)
 
