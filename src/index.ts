@@ -183,6 +183,11 @@ export default Canister({
                UserNotInDao : DaoId
             });
         }
+        if(propo.executed != false){
+            return Err({
+                Error: ProposalId
+            })
+        }
         let hasVoted = false
         //to check if user has already voted
         for (let i = 0; i < propo.votesWith.length; i++) {
@@ -285,6 +290,83 @@ export default Canister({
         
         return Ok(props)
         
+    }),
+
+    executeProposal: update([Principal, Principal],Result(Proposal, DaoError),(DaoId, ProposalId)=>{
+        const DaoOpt = DaoList.get(DaoId)
+        const ProposalOpt = ProposalSave.get(ProposalId);
+
+        if('None' in DaoOpt){
+            return Err({
+                DaoDoesNotExist: ic.caller()
+            })
+        }
+        if('None' in ProposalOpt){
+            return Err({
+                ProposalDoesNotExist: ProposalId
+            })
+        }
+        const propo = ProposalOpt.Some
+        const dao = DaoOpt.Some
+           // Check if the caller is already a delegate in the DAO
+    const isCallerDelegate = dao.Delegates.some((delegate: typeof Delegates) => {
+        return delegate.id.toText() === ic.caller().toText();
+    });
+    if (!isCallerDelegate) {
+        return Err({
+            UserNotInDao: DaoId
+        });
+    }
+     // Check if the proposal has enough votes in favor to be executed
+     if (propo.votesWith.length <= propo.votesAgainst.length) {
+        return Err({
+            Error: ProposalId
+        });
+    }
+
+    if (!propo.executed) {
+    // Amount represents the number of shares to be sent to the beneficiary
+        const sharesToSend = propo.Amount;
+        if (dao.CurrentFunds >= sharesToSend) {
+            // Update the DAO's funds by subtracting the sharesToSend
+            const updatedFunds = dao.CurrentFunds - sharesToSend;
+
+            // Update the DAO's TotalShares by adding sharesToSend to the beneficiary
+            const updatedTotalShares = dao.TotalShares + sharesToSend;
+
+            // Update the DAO's lockedFunds 
+            const updatedLockedFunds = dao.lockedFunds;
+           
+
+            // Update the DAO with the new values
+            const updatedDao: typeof DAO = {
+                ...dao,
+                CurrentFunds: updatedFunds,
+                TotalShares: updatedTotalShares,
+                lockedFunds: updatedLockedFunds
+            };
+
+            
+
+            // Update data structures
+            DaoList.insert(dao.id, updatedDao);
+            DaoCreator.insert(dao.creator, updatedDao);
+           
+          
+
+        }
+    }
+     const updatedProposal: typeof Proposal = {
+        ...propo,
+        executed: true
+    };
+    ProposalSave.insert(updatedProposal.id, updatedProposal);
+    return Ok(updatedProposal);
+
+     
+
+    
+
     }),
 
     //input the id of the dao you want to join
