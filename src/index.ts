@@ -9,7 +9,10 @@ const DaoError = Variant({
     DaoDoesNotExist: Principal,
     UserDoesNotExist: Principal,
     Error: Principal,
-    AlreadyJoinedDao: Principal
+    AlreadyJoinedDao: Principal,
+    UserNotInDao: Principal,
+    ProposalDoesNotExist: Principal,
+    AlreadyVoted: Principal
 });
 export default Canister({
 
@@ -31,11 +34,12 @@ export default Canister({
             Proposals: [],
             DaoAvailable: true,
             lockedFunds: 500n,
-            Delegates: [delegate],
+            Delegates: [],
             creator: ic.caller(),
             CreatedAt: ic.time(),
             updatedAt: None
         } 
+        dao.Delegates.push(delegate)
 
         DaoCreator.insert(ic.caller(),dao)
         DaoList.insert(dao.id, dao)
@@ -68,6 +72,9 @@ export default Canister({
 
 
     }),
+    getDaoInfoById: query([Principal],Opt(DAO),(id)=>{
+        return DaoList.get(id);
+    }),
     TurnOffDao: update([Principal],Result(DAO,DaoError), (id)=>{
         const DaoOpt = DaoList.get(id);
         if('None' in DaoOpt){
@@ -95,10 +102,24 @@ export default Canister({
         
         const id  = generateId()
         const DaoOpt = DaoList.get(DaoId)
+        if('None' in DaoOpt){
+            return Err({
+                DaoDoesNotExist: ic.caller()
+            })
+        }
+
         const dao = DaoOpt.Some
-        const isCallerDelegate = dao.Delegates.some((delegate: typeof Delegates) => {
-            return delegate.id.toText() === ic.caller().toText();
-        });
+        let isCallerDelegate = false;
+
+        for (let i = 0; i < dao.Delegates.length; i++) {
+            const delegateId = dao.Delegates[i].id.toString();
+            if (delegateId === ic.caller().toString()) {
+                isCallerDelegate = true;
+                break;
+            }
+        }
+   
+    
         ic.print(`Caller: ${ic.caller().toText()}`);
         dao.Delegates.forEach((delegate: typeof Delegates) => {
             ic.print(`Delegate: ${delegate.id.toText()}`);
@@ -109,35 +130,161 @@ export default Canister({
     
         if (!isCallerDelegate) {
             return Err({
-                UserDoesNotExist: ic.caller()
+                UserNotInDao: ic.caller()
             });
         }
         const proposal : typeof Proposal = {
             ...payload,
             id: id,
-            votesAgainst: 0n,
-            votesWith: 0n,
+            votesAgainst: [],
+            votesWith: [],
             CreatedAt: ic.time(),
             executed: false,
             ProposerAddress: ic.caller(),
             updatedAt: None
         }
+        const updatedProposal= dao.Proposals.push(proposal)
+        const updatedDao :typeof DAO = {
+            ...dao,
+            ...updatedProposal,
+            updatedProposal
+        }
+        DaoCreator.insert(dao.creator, updatedDao)
+        DaoList.insert(dao.id, updatedDao)
         ProposalSave.insert(proposal.id, proposal)
         return Ok(proposal);
         
        
-        // if('None' in DaoOpt){
-        //     return Err({
-        //         DaoDoesNotExist: ic.caller()
-        //     })
-        // }
+      
+    }),
+    voteWithProposal: update([Principal,Principal],Result(Proposal,DaoError),(DaoId, ProposalId)=>{
+        const DaoOpt = DaoList.get(DaoId)
+        const ProposalOpt = ProposalSave.get(ProposalId);
+
+        if('None' in DaoOpt){
+            return Err({
+                DaoDoesNotExist: ic.caller()
+            })
+        }
+        if('None' in ProposalOpt){
+            return Err({
+                ProposalDoesNotExist: ProposalId
+            })
+        }
+        const propo = ProposalOpt.Some
+        const dao = DaoOpt.Some
+         // Check if the caller is already a delegate in the DAO
+    
+         const isCallerDelegate = dao.Delegates.some((delegate: typeof Delegates) => {
+            return delegate.id.toText() === ic.caller().toText();
+        });
+        if (!isCallerDelegate) {
+            return Err({
+               UserNotInDao : DaoId
+            });
+        }
+        let hasVoted = false
+        //to check if user has already voted
+        for (let i = 0; i < propo.votesWith.length; i++) {
+            const voter = propo.votesWith[i].toString();
+            if (voter === ic.caller().toString()) {
+                hasVoted = true;
+                break;
+            }
+        }
+        for (let i = 0; i < propo.votesAgainst.length; i++) {
+            const voter = propo.votesWith[i].toString();
+            if (voter === ic.caller().toString()) {
+                hasVoted = true;
+                break;
+            }
+        }
+        if(hasVoted){
+            return Err({
+                AlreadyVoted: ProposalId
+            })
+        }
+        const vote = propo.votesWith.push(ic.caller())
+        const props : typeof Proposal = {
+            ...propo,
+            ...vote,
+            vote
+        }
+        const daos:typeof DAO = {
+            ...dao,
+            ...props
+        }
+        DaoList.insert(daos.id, daos)
+        DaoCreator.insert(daos.creator, daos)
+        ProposalSave.insert(props.id, props)
+        
+        return Ok(props)
+        
 
     }),
-    voteWithProposal: update([],Void,()=>{
+    voteAgainstProposal: update([Principal,Principal],Result(Proposal,DaoError),(DaoId, ProposalId)=>{
+        const DaoOpt = DaoList.get(DaoId)
+        const ProposalOpt = ProposalSave.get(ProposalId);
 
-    }),
-    voteAgainstProposal: update([],Void,()=>{
-
+        if('None' in DaoOpt){
+            return Err({
+                DaoDoesNotExist: ic.caller()
+            })
+        }
+        if('None' in ProposalOpt){
+            return Err({
+                ProposalDoesNotExist: ProposalId
+            })
+        }
+        const propo = ProposalOpt.Some
+        const dao = DaoOpt.Some
+         // Check if the caller is already a delegate in the DAO
+    
+         const isCallerDelegate = dao.Delegates.some((delegate: typeof Delegates) => {
+            return delegate.id.toText() === ic.caller().toText();
+        });
+        if (!isCallerDelegate) {
+            return Err({
+               UserNotInDao : DaoId
+            });
+        }
+        let hasVoted = false
+        //to check if user has already voted
+        for (let i = 0; i < propo.votesAgainst.length; i++) {
+            const voter = propo.votesWith[i].toString();
+            if (voter === ic.caller().toString()) {
+                hasVoted = true;
+                break;
+            }
+        }
+        for (let i = 0; i < propo.votesWith.length; i++) {
+            const voter = propo.votesWith[i].toString();
+            if (voter === ic.caller().toString()) {
+                hasVoted = true;
+                break;
+            }
+        }
+        if(hasVoted){
+            return Err({
+                AlreadyVoted: ProposalId
+            })
+        }
+        const vote = propo.votesAgainst.push(ic.caller())
+        const props : typeof Proposal = {
+            ...propo,
+            ...vote,
+            vote
+        }
+        const daos:typeof DAO = {
+            ...dao,
+            ...props
+        }
+        DaoList.insert(daos.id, daos)
+        DaoCreator.insert(daos.creator, daos)
+        ProposalSave.insert(props.id, props)
+        
+        return Ok(props)
+        
     }),
 
     //input the id of the dao you want to join
@@ -151,7 +298,7 @@ export default Canister({
         const dao = DaoOpt.Some;
          // Check if the caller is already a delegate in the DAO
     
-         const isCallerDelegate = dao.Delegates.find((delegate: typeof Delegates) => {
+         const isCallerDelegate = dao.Delegates.some((delegate: typeof Delegates) => {
             return delegate.id.toString() === ic.caller().toString();
         });
         console.log(isCallerDelegate)
@@ -160,18 +307,27 @@ export default Canister({
                 AlreadyJoinedDao: ic.caller()
             });
         }
-        // if(dao.creator.toString() == ic.caller().toString() && dao.DaoAvailable == false){
-        //     return Err({
-        //         Error: ic.caller()
-        //     })
-        // }
+        if(dao.creator.toString() == ic.caller().toString() && dao.DaoAvailable == false){
+            return Err({
+                Error: ic.caller()
+            })
+        }
         const delegate : typeof Delegates={
             id: ic.caller(),
             shares: 2000n
         }
+        if(dao.TotalShares- 2000n < 1000n){
+            return Err({
+                Error: id
+            })
+        }
+        const dele = dao.Delegates.push(delegate)
+        const shares = dao.TotalShares - 2000n
         const ddao : typeof DAO = {
             ...dao,
-            Delegates:[...dao.Delegates, delegate]
+            TotalShares: shares,
+           ...dele,
+           dele
 
         }
         DaoCreator.insert(dao.creator, dao)
@@ -182,8 +338,42 @@ export default Canister({
 
 
     }),
+    // address of the dao
+    viewProposalsInDao: query([Principal], Result(Vec(Proposal),DaoError),(id)=>{
+        const daoOpt = DaoList.get(id)
+        const dao= daoOpt.Some
+        const isCallerDelegate = dao.Delegates.some((delegate: typeof Delegates) => {
+            return delegate.id.toString() === ic.caller().toString();
+        });
+        if(!isCallerDelegate){
+            return Err({
+                UserNotInDao: id
+            })
+        }
+        return dao.Proposals;
+
+    }),
     DaoList: query([],Vec(DAO),()=>{
         return DaoList.values()
+    }),
+
+    deleteDao:update([Principal],Result(DAO, DaoError),(id)=>{
+        const daoOpt = DaoList.get(id);
+        const dao= daoOpt.Some
+        if('None' in daoOpt){
+            return Err({
+                DaoDoesNotExist: id
+            })
+        }
+        
+        if(dao.creator.toString() != ic.caller().toString()){
+            return Err({
+                Error: id
+            })
+        }
+        dao.remove(id);
+        return dao;
+
     }),
     
     getPrincipal: query([], Principal,()=>{
@@ -216,4 +406,7 @@ function generateId(): Principal {
 
 
 // dfx canister call dao createDaos '(record{"name"="yyy"; "TotalShares"=100000})'
+// dfx canister call dao createProposal '(principal "kdcwa-glmgp-pa26j-kxc5u-qhgbv-k3vnu-kn
+// afe-ihs7v-xinxz-my3nw-xrc", record{"title"="fund startups";"Description"="a dao to fund startups";"Amount"=1000;"benefit
+// iary"=principal "kdcwa-glmgp-pa26j-kxc5u-qhgbv-k3vnu-knafe-ihs7v-xinxz-my3nw-xrc"})'
 
