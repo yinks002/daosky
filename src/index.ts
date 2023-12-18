@@ -19,9 +19,9 @@ export default Canister({
     getAllDaos: query([],Vec(DAO),()=>{
         return DaoCreator.values()
     }),
-
+    // function to create dao
     createDaos: update([DaoPayload], DAO, (payload)=>{
-
+        // generate random principal 
         const id = generateId();
         const delegate : typeof Delegates={
             id: ic.caller(),
@@ -45,6 +45,76 @@ export default Canister({
         DaoList.insert(dao.id, dao)
         return dao;
     }),
+
+    //function to remove delegate from dao
+    Delegateremove: update([Principal], Result(Delegates, DaoError), (DaoId)=>{
+        const caller = ic.caller();
+
+        // Find the DAO with the specified ID
+    const daoOpt = DaoList.get(DaoId);
+
+    if ('None' in daoOpt) {
+        return Err({
+            DaoDoesNotExist: DaoId
+        });
+    }
+
+    const dao = daoOpt.Some as typeof DAO;
+
+    // Check if the caller is a delegate in the specified DAO
+    const isCallerDelegate = dao.Delegates.some((delegate: typeof Delegates) => {
+        return delegate.id.toText() === caller.toText();
+    });
+
+    if (!isCallerDelegate) {
+        return Err({
+            UserNotInDao: DaoId
+        });
+    }
+      // Filter out the caller from the list of delegates
+      const updatedDelegates = dao.Delegates.filter((delegate: typeof Delegates) => {
+        return delegate.id.toText() !== caller.toText();
+    });
+
+    
+
+    // Update the DAO with the new list of delegates
+    const updatedDao: typeof DAO = {
+        ...dao,
+        Delegates: updatedDelegates
+    };
+
+    // Update data structures
+    DaoList.insert(dao.id, updatedDao);
+    DaoCreator.insert(dao.creator, updatedDao);
+
+    return Ok({
+        id: caller,
+        shares: 0n 
+    });
+    }),
+
+    // Find the DAOs where the caller is a delegate
+    getDaosForDelegate: query([], Vec(DAO), ()=>{
+        
+
+        const caller = ic.caller();
+
+        // Find the DAOs where the caller is a delegate
+        const daosForDelegate = DaoList.values().filter((dao: typeof DAO) => {
+            return dao.Delegates.some((delegate: typeof Delegates) => {
+                return delegate.id.toText() === caller.toText();
+            });
+        });
+    
+        if (daosForDelegate.length === 0) {
+            // If the list is empty, return an empty Vec(DAO)
+            return [];
+        }
+    
+        return daosForDelegate;
+    }),
+    // fucntion for a dao creator to add more shares
     addMoreShares:update([Principal,nat64], Result(DAO,DaoError),(DaoId,shares)=>{
         const daoOpt = DaoList.get(DaoId)
         if( 'None' in daoOpt){
@@ -72,9 +142,11 @@ export default Canister({
 
 
     }),
+    // to get dao info by dao id
     getDaoInfoById: query([Principal],Opt(DAO),(id)=>{
         return DaoList.get(id);
     }),
+    //function to lock dao and restrict new delegates
     TurnOffDao: update([Principal],Result(DAO,DaoError), (id)=>{
         const DaoOpt = DaoList.get(id);
         if('None' in DaoOpt){
@@ -97,7 +169,7 @@ export default Canister({
         return Ok(ddao);
 
     }),
-
+    //for deleates to create proposals
     createProposal: update([Principal,ProposalPayload], Result(Proposal,DaoError), (DaoId,payload)=>{
         
         const id  = generateId()
@@ -157,6 +229,7 @@ export default Canister({
        
       
     }),
+    // for delegates to vote in favor of proposal
     voteWithProposal: update([Principal,Principal],Result(Proposal,DaoError),(DaoId, ProposalId)=>{
         const DaoOpt = DaoList.get(DaoId)
         const ProposalOpt = ProposalSave.get(ProposalId);
@@ -227,6 +300,7 @@ export default Canister({
         
 
     }),
+    //for delegates to vote against the favor of proposal
     voteAgainstProposal: update([Principal,Principal],Result(Proposal,DaoError),(DaoId, ProposalId)=>{
         const DaoOpt = DaoList.get(DaoId)
         const ProposalOpt = ProposalSave.get(ProposalId);
@@ -291,7 +365,7 @@ export default Canister({
         return Ok(props)
         
     }),
-
+    //to execute a proposal given the votes are in favour
     executeProposal: update([Principal, Principal],Result(Proposal, DaoError),(DaoId, ProposalId)=>{
         const DaoOpt = DaoList.get(DaoId)
         const ProposalOpt = ProposalSave.get(ProposalId);
@@ -421,6 +495,7 @@ export default Canister({
 
     }),
     // address of the dao
+    // to view proposals in dao
     viewProposalsInDao: query([Principal], Result(Vec(Proposal),DaoError),(id)=>{
         const daoOpt = DaoList.get(id)
         const dao= daoOpt.Some
@@ -432,13 +507,13 @@ export default Canister({
                 UserNotInDao: id
             })
         }
-        return dao.Proposals;
+        return Ok(dao.Proposals);
 
     }),
     DaoList: query([],Vec(DAO),()=>{
         return DaoList.values()
     }),
-
+    // for a dao creator to delete dao
     deleteDao:update([Principal],Result(DAO, DaoError),(id)=>{
         const daoOpt = DaoList.get(id);
         const dao= daoOpt.Some
@@ -491,4 +566,8 @@ function generateId(): Principal {
 // dfx canister call dao createProposal '(principal "kdcwa-glmgp-pa26j-kxc5u-qhgbv-k3vnu-kn
 // afe-ihs7v-xinxz-my3nw-xrc", record{"title"="fund startups";"Description"="a dao to fund startups";"Amount"=1000;"benefit
 // iary"=principal "kdcwa-glmgp-pa26j-kxc5u-qhgbv-k3vnu-knafe-ihs7v-xinxz-my3nw-xrc"})'
+
+
+
+//tuna capital exotic find pottery security diet decide tag plate blade fix calm network battle gauge option peasant renew dismiss hint check churn income
 
